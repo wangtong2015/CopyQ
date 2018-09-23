@@ -36,6 +36,7 @@
 namespace {
 
 const char propertyGeometryLockedUntilHide[] = "CopyQ_geometry_locked_until_hide";
+const char propertyLastGeometryOptionName[] = "CopyQ_last_geometry_option_name";
 
 enum class GeometryAction {
     Save,
@@ -136,7 +137,12 @@ void restoreWindowGeometry(QWidget *w, bool openOnCurrentScreen)
 {
     const QString optionName = geometryOptionName(*w, GeometryAction::Restore, openOnCurrentScreen);
     const QString tag = resolutionTag(*w, GeometryAction::Restore, openOnCurrentScreen);
-    QByteArray geometry = geometryOptionValue(optionName + tag).toByteArray();
+    const QString optionNameWithTag = optionName + tag;
+    const QString lastOptionName = w->property(propertyLastGeometryOptionName).toString();
+    if (optionNameWithTag == lastOptionName)
+        return;
+
+    QByteArray geometry = geometryOptionValue(optionNameWithTag).toByteArray();
 
     // If geometry for screen resolution doesn't exist, use last saved one.
     const bool hasGeometryTag = geometry.isEmpty();
@@ -162,35 +168,38 @@ void restoreWindowGeometry(QWidget *w, bool openOnCurrentScreen)
         }
     }
 
-    if (w->saveGeometry() != geometry) {
-        const auto oldGeometry = w->geometry();
+    const auto oldGeometry = w->geometry();
+    w->restoreGeometry(geometry);
+
+    // Workaround for broken geometry restore.
+    if ( w->geometry().isEmpty() ) {
+        GEOMETRY_LOG( w, QString("Workaround for broken geometry restore") );
+        w->showNormal();
         w->restoreGeometry(geometry);
-
-        // Workaround for broken geometry restore.
-        if ( w->geometry().isEmpty() ) {
-            GEOMETRY_LOG( w, QString("Workaround for broken geometry restore") );
-            w->showNormal();
-            w->restoreGeometry(geometry);
-            w->showMinimized();
-        }
-
-        const auto newGeometry = w->geometry();
-
-        GEOMETRY_LOG( w, QString("Restore geometry \"%1%2\": %3 -> %4").arg(
-                          optionName,
-                          hasGeometryTag ? tag : QString(),
-                          toString(oldGeometry),
-                          toString(newGeometry)) );
+        w->showMinimized();
     }
+
+    w->setProperty(propertyLastGeometryOptionName, optionNameWithTag);
+
+    const auto newGeometry = w->geometry();
+
+    GEOMETRY_LOG( w, QString("Restore geometry \"%1%2\": %3 -> %4").arg(
+                      optionName,
+                      hasGeometryTag ? tag : QString(),
+                      toString(oldGeometry),
+                      toString(newGeometry)) );
 }
 
 void saveWindowGeometry(QWidget *w, bool openOnCurrentScreen)
 {
     const QString optionName = geometryOptionName(*w, GeometryAction::Save, openOnCurrentScreen);
     const QString tag = resolutionTag(*w, GeometryAction::Save, openOnCurrentScreen);
+    const QString optionNameWithTag = optionName + tag;
     QSettings geometrySettings( getGeometryConfigurationFilePath(), QSettings::IniFormat );
-    geometrySettings.setValue( optionName + tag, w->saveGeometry() );
-    geometrySettings.setValue( optionName, w->saveGeometry() );
+    const QByteArray geometry = w->saveGeometry();
+    geometrySettings.setValue(optionNameWithTag, geometry);
+    geometrySettings.setValue(optionName, geometry);
+    w->setProperty(propertyLastGeometryOptionName, optionNameWithTag);
     GEOMETRY_LOG( w, QString("Save geometry \"%1%2\": %3").arg(optionName, tag, toString(w->geometry())) );
 }
 
